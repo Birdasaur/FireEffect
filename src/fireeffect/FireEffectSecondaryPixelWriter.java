@@ -115,13 +115,20 @@ public class FireEffectSecondaryPixelWriter extends Application {
                     int c, pAsInt, r2, g2, b2, newPixel;
                     for (int z = 0; z < fire.length; z++) {
                         c = fire[z];
-                        pAsInt = paletteAsInts[c] & 0xFF;
+                        pAsInt = paletteAsInts[c];
                         r2 = (pAsInt << 16);
                         g2 = (pAsInt << 8);
                         b2 = pAsInt;
                         newPixel = (0xFF<<24) | r2 | g2 | b2;
                         //fireBuf[z] = newPixel;
+
+                        // Not sure if there is an issue with the timing when render thread
+                        // is waiting when the system.out is slowing the worker thread the output is different.
+                        //System.out.println("pAsInt=" + pAsInt + " newPixel=" + newPixel + " " + INTtoRGB(newPixel));
+
                         pwBuffer.setArgb(z%screenWidth, (z/screenWidth), newPixel);
+
+                        //pwBuffer.setColor(z%screenWidth, (z/screenWidth), INTtoRGB(pAsInt));
                     }
 
 //                    synchronized (lock) {
@@ -178,8 +185,10 @@ public class FireEffectSecondaryPixelWriter extends Application {
             //pal[x] = Color.hsb(x / 3.0, 1.0, brightness , 1);
             // 65536 * r + 256 * g + b;
             //pal[x] = rgbToInt(Color.rgb(x, x, x));
-            pal[x] = (65536 * x) + 256 * x + x;
-
+            double brightness = Math.min(255, x*2) / 255.0;
+            Color color = Color.hsb(x / 3.0, 1.0, brightness , 1);
+            pal[x] = rgbToInt(color);
+            //System.out.println("pal[x] " + color + " int is " + pal[x]);
         }
         //if (true) throw new NullPointerException();
         return pal;

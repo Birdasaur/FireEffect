@@ -1,6 +1,5 @@
 package fireeffect;
 
-import java.util.Random;
 import javafx.animation.AnimationTimer;
 import javafx.application.Application;
 import javafx.concurrent.Task;
@@ -11,6 +10,8 @@ import javafx.scene.image.PixelWriter;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.paint.Color;
 import javafx.stage.Stage;
+
+import java.util.Random;
 
 /**
  *
@@ -125,6 +126,7 @@ public class FireEffect extends Application {
             //palette[x] = RGBtoINT();
             double brightness = Math.min(255, x*2) / 255.0;
             pal[x] = Color.hsb(x / 3.0, 1.0, brightness , 1);
+//            System.out.println("pal[x] " + pal[x] + " int is " + rgbToInt(pal[x]));
 //            pal[x] = Color.rgb(x, x, x);
         }        
         return pal;
