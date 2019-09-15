@@ -80,11 +80,12 @@ public class FireEffectSecondaryPixelWriter extends Application {
                     Arrays.parallelSetAll(bottomRow, value -> Math.abs(32768 + rand.nextInt(65536)) % 256);
                     System.arraycopy(bottomRow, 0, fire, fireStartHeight, screenWidth);
 
+                    int a, b, row;
                     for (int y = 0; y < screenHeight - 1; y++) {
                         for (int x = 0; x < screenWidth; x++) {
-                            int a = (y + 1) % screenHeight * screenWidth;
-                            int b = (x) % screenWidth;
-                            int row = y * screenWidth;
+                            a = (y + 1) % screenHeight * screenWidth;
+                            b = (x) % screenWidth;
+                            row = y * screenWidth;
                             fire[row + x]
                                     = ((fire[a + ((x - 1 + screenWidth) % screenWidth)]
                                     + fire[((y + 2) % screenHeight) * screenWidth + b]
@@ -111,16 +112,16 @@ public class FireEffectSecondaryPixelWriter extends Application {
 //
 //                    }
 
+                    int c, pAsInt, r2, g2, b2, newPixel;
                     for (int z = 0; z < fire.length; z++) {
-                        int c = fire[z];
-                        int pAsInt = paletteAsInts[c] & 0xFF;
-                        int r2 = (pAsInt << 16);
-                        int g2 = (pAsInt << 8);
-                        int b2 = pAsInt;
-                        int newPixel = (0xFF<<24) | r2 | g2 | b2;
+                        c = fire[z];
+                        pAsInt = paletteAsInts[c] & 0xFF;
+                        r2 = (pAsInt << 16);
+                        g2 = (pAsInt << 8);
+                        b2 = pAsInt;
+                        newPixel = (0xFF<<24) | r2 | g2 | b2;
                         //fireBuf[z] = newPixel;
                         pwBuffer.setArgb(z%screenWidth, (z/screenWidth), newPixel);
-
                     }
 
 //                    synchronized (lock) {

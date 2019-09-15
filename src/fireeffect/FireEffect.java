@@ -123,9 +123,9 @@ public class FireEffect extends Application {
             //color = HSLtoRGB(ColorHSL(x / 3, 255, std::min(255, x * 2)));
             //set the palette to the calculated RGB value
             //palette[x] = RGBtoINT();
-            //double brightness = Math.min(255, x*2) / 255.0;
-            //pal[x] = Color.hsb(x / 3.0, 1.0, brightness , 1);
-            pal[x] = Color.rgb(x, x, x);
+            double brightness = Math.min(255, x*2) / 255.0;
+            pal[x] = Color.hsb(x / 3.0, 1.0, brightness , 1);
+//            pal[x] = Color.rgb(x, x, x);
         }        
         return pal;
     }
