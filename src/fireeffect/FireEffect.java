@@ -1,33 +1,48 @@
 package fireeffect;
-
 import javafx.animation.AnimationTimer;
 import javafx.application.Application;
 import javafx.concurrent.Task;
 import javafx.scene.Scene;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
-import javafx.scene.image.PixelWriter;
+import javafx.scene.image.*;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.paint.Color;
 import javafx.stage.Stage;
 
+import java.nio.IntBuffer;
+import java.util.Arrays;
 import java.util.Random;
-
+import static javafx.application.Application.launch;
+import javafx.beans.property.SimpleBooleanProperty;
+import javafx.scene.control.RadioButton;
+import javafx.scene.control.ToggleGroup;
+import javafx.scene.layout.HBox;
 /**
  *
  * @author phillsm1
  */
 public class FireEffect extends Application {
 
+    SimpleBooleanProperty classic = new SimpleBooleanProperty(true);
     Canvas canvas;
+    int[] paletteAsInts; //this will contain the color palette
 
     @Override
     public void start(Stage primaryStage) {
         canvas = new Canvas(600, 600);
         BorderPane root = new BorderPane(canvas);
-        Scene scene = new Scene(root, Color.WHITESMOKE);
+        RadioButton classicRB = new RadioButton("Classic flame");
+        classicRB.setSelected(true);
+        classic.bind(classicRB.selectedProperty());
+        RadioButton wavesRB = new RadioButton("Waves of Fire");
+        ToggleGroup tg = new ToggleGroup();
+        tg.getToggles().addAll(classicRB, wavesRB);
+        HBox toggleBox = new HBox(10, classicRB, wavesRB);
+        root.setTop(toggleBox);
+        Scene scene = new Scene(root, Color.BLACK);
         initCanvas();
-        primaryStage.setTitle("Classic Fire");
+        primaryStage.setTitle("FireEffect");
         primaryStage.setScene(scene);
         primaryStage.show();
     }
@@ -45,43 +60,63 @@ public class FireEffect extends Application {
         int screenHeight = 600;
 
         // Y-coordinate first because we use horizontal scanlines
-        int[][] fire = new int[screenHeight][screenWidth];  //this buffer will contain the fire
-        Color[] palette; //this will contain the color palette
+        int[] fire = new int[screenHeight * screenWidth];  //this buffer will contain the fire
+        int[] fireBuf = new int[screenHeight * screenWidth];
+        int[] bottomRow = new int[screenWidth];
+        
+//        int[] paletteAsInts; //this will contain the color palette
+        WritableImage writableImage = new WritableImage(screenWidth, screenHeight);
+        PixelWriter pwBuffer = writableImage.getPixelWriter();
+        PixelReader prBuffer = writableImage.getPixelReader();
+        WritablePixelFormat<IntBuffer> pixelFormat = WritablePixelFormat.getIntArgbInstance();
+
         GraphicsContext gc = canvas.getGraphicsContext2D();
         PixelWriter pw = gc.getPixelWriter();
-
-        palette = generatePalette(256);
+        
+        
+        paletteAsInts = generateArgbPalette(256);
 
         Task fireTask = new Task() {
             @Override
             protected Void call() throws Exception {
-                long counter = 0;
                 Random rand = new Random();
                 //random latch
                 boolean latch = true;
-                
+                long startTime = 0;
+                long elapseTime = 0;
+                int fireStartHeight = (screenHeight - 1) * screenWidth;
                 //start the loop (one frame per loop)
                 while(!this.isCancelled() && !this.isDone()) {
-                    if(latch) {
-                        //randomize the bottom row of the fire buffer
-                        for (int x = 0; x < screenWidth; x++) {
-                            fire[screenHeight - 1][x] = Math.abs(32768 + rand.nextInt(65536)) % 256;
-                        }
-//                        latch = false;
-                    }
-                    //do the fire calculations for every pixel, from top to bottom
+                    // Start stop watch
+                    startTime = System.currentTimeMillis();
+
+                    //randomize the bottom row of the fire buffer
+                    Arrays.parallelSetAll(bottomRow, value -> Math.abs(32768 + rand.nextInt(65536)) % 256);
+                    System.arraycopy(bottomRow, 0, fire, fireStartHeight, screenWidth);
+//                    System.arraycopy(bottomRow, 0, fireBuf, fireStartHeight, screenWidth);
+
+                    int a, b, row, index, pixel;
+                    
                     for (int y = 0; y < screenHeight - 1; y++) {
                         for (int x = 0; x < screenWidth; x++) {
-                            fire[y][x]
-                                    = ((fire[(y + 1) % screenHeight][(x - 1 + screenWidth) % screenWidth]
-                                    + fire[(y + 2) % screenHeight][(x) % screenWidth]
-                                    + fire[(y + 1) % screenHeight][(x + 1) % screenWidth]
-                                    + fire[(y + 3) % screenHeight][(x) % screenWidth])
+                            a = (y + 1) % screenHeight * screenWidth;
+                            b = x % screenWidth;
+                            row = y * screenWidth;
+                            index = row + x;
+                            pixel = fire[index]
+                                    = ((fire[a + ((x - 1 + screenWidth) % screenWidth)]
+                                    + fire[((y + 2) % screenHeight) * screenWidth + b]
+                                    + fire[a + ((x + 1) % screenWidth)]
+                                    + fire[((y + 3) % screenHeight * screenWidth) + b])
                                     * 128) / 513;
-                            
+                            fireBuf[index] = getPaletteValue(pixel);
                         }
                     }
-                    System.out.println(counter++);    
+
+                    pwBuffer.setPixels(0, 0, screenWidth, screenHeight, pixelFormat, fireBuf, 0, screenWidth);
+                    elapseTime = System.currentTimeMillis() - startTime;
+                    System.out.println("Worker thread takes : " + elapseTime + "ms");
+                    //System.out.println(counter++);
                     Thread.sleep(33);
                 }
                 return null;
@@ -94,27 +129,35 @@ public class FireEffect extends Application {
         AnimationTimer at = new AnimationTimer() {
             public long lastTimerCall = 0;
             private final long NANOS_PER_MILLI = 1000000; //nanoseconds in a millisecond
-            private final long ANIMATION_DELAY = 16 * NANOS_PER_MILLI;   
-
+            private final long ANIMATION_DELAY = 16 * NANOS_PER_MILLI;
+            private double startTime;
+            private double elapseTime;
             @Override
             public void handle(long now) {
                 if(now > lastTimerCall + ANIMATION_DELAY) {
-                    //set the drawing buffer to the fire buffer, using the palette colors
-                    for (int y = 0; y < screenHeight; y++) {
-                        for (int x = 0; x < screenWidth; x++) {
-                            //buffer[y][x] = palette[fire[y][x]];
-                            pw.setColor(x, y, palette[fire[y][x]]);
-                        }
-                    }
+                    startTime = System.nanoTime();
+                    pw.setPixels(0, 0, screenWidth, screenHeight, prBuffer, 0, 0);
                     lastTimerCall = now;    //update for the next animation
+                    elapseTime = (System.nanoTime() - startTime)/1e6;
+                    System.out.println("UI Render thread takes : " + elapseTime + "ms");
                 }
             }
         };
         at.start();
     }
-   
-    private Color[] generatePalette(int max ) {
-        Color [] pal = new Color[max];
+    private int getPaletteValue(int pixelIndex) {
+        if(classic.get())  
+            return paletteAsInts[pixelIndex];
+        else {
+            return  
+                paletteAsInts[pixelIndex] << 16 |
+                paletteAsInts[pixelIndex] << 8 | 
+                paletteAsInts[pixelIndex];
+        }
+    }
+    
+    private int[] generateArgbPalette(int max ) {
+        int [] pal = new int[max];
         //generate the palette
         for (int x = 0; x < max; x++) {
             //HSLtoRGB is used to generate colors:
@@ -125,82 +168,24 @@ public class FireEffect extends Application {
             //set the palette to the calculated RGB value
             //palette[x] = RGBtoINT();
             double brightness = Math.min(255, x*2) / 255.0;
-            pal[x] = Color.hsb(x / 3.0, 1.0, brightness , 1);
-//            System.out.println("pal[x] " + pal[x] + " int is " + rgbToInt(pal[x]));
-//            pal[x] = Color.rgb(x, x, x);
-        }        
+            Color color = Color.hsb(x / 3.0, 1.0, brightness , 1);
+            pal[x] = rgbToIntArgb(color);            
+        }
         return pal;
     }
-    private int rgbToInt(Color colorRGB) {
-      return 65536 * (int)(colorRGB.getRed()*255) + 256 * (int)(colorRGB.getGreen()*255) + (int)(colorRGB.getBlue()*255);
-    }
 
-    Color INTtoRGB(int colorINT) {
+    private static int rgbToIntArgb(Color colorRGB) {
+      return (int)(colorRGB.getOpacity()*255) << 24 |
+             (int)(colorRGB.getRed()    *255) << 16 | 
+             (int)(colorRGB.getGreen()  *255) <<  8 | 
+             (int)(colorRGB.getBlue()   *255);
+    }    
+
+    static Color INTtoRGB(int colorINT) {
       return new Color(
         (colorINT / 65536) % 256, 
         (colorINT / 256) % 256,
         colorINT % 256,
         1.0);
     }    
-
-//    private void writePixels(GraphicsContext gc) 
-//    {
-//        // Define properties of the Image
-//        int spacing = 5;
-//        int imageWidth = 300;
-//        int imageHeight = 100;
-//        int rows = imageHeight/(RECT_HEIGHT + spacing);
-//        int columns = imageWidth/(RECT_WIDTH + spacing);
-// 
-//        // Get the Pixels
-//        byte[] pixels = this.getPixelsData();
-//         
-//        // Create the PixelWriter
-//        PixelWriter pixelWriter = gc.getPixelWriter();
-//         
-//        // Define the PixelFormat
-//        PixelFormat<ByteBuffer> pixelFormat = PixelFormat.getByteRgbInstance();
-//         
-//        // Write the pixels to the canvas
-//        for (int y = 0; y < rows; y++) 
-//        {
-//            for (int x = 0; x < columns; x++) 
-//            {
-//                int xPos = 50 + x * (RECT_WIDTH + spacing);
-//                int yPos = 50 + y * (RECT_HEIGHT + spacing);
-//                pixelWriter.setPixels(xPos, yPos, RECT_WIDTH, RECT_HEIGHT,
-//                        pixelFormat, pixels, 0, RECT_WIDTH * 3);
-//            }
-//        }    
-//    }
-//    private byte[] getPixelsData() 
-//    {
-//        // Create the Array
-//        byte[] pixels = new byte[RECT_WIDTH * RECT_HEIGHT * 3];
-//        // Set the ration
-//        double ratio = 1.0 * RECT_HEIGHT/RECT_WIDTH;
-//        // Generate pixel data
-//        for (int y = 0; y < RECT_HEIGHT; y++) 
-//        {
-//            for (int x = 0; x < RECT_WIDTH; x++) 
-//            {
-//                int i = y * RECT_WIDTH * 3 + x * 3;
-//                if (x <= y/ratio) 
-//                {
-//                    pixels[i] = -1;
-//                    pixels[i+1] = 1;
-//                    pixels[i+2] = 0;
-//                } 
-//                else
-//                {
-//                    pixels[i] = 1;
-//                    pixels[i+1] = 1;
-//                    pixels[i+2] = 0;
-//                }
-//            }
-//        }
-//
-//        // Return the Pixels
-//        return pixels;
-//    }     
-}
+}    
