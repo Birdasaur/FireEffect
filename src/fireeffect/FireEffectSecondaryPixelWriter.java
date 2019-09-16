@@ -79,6 +79,7 @@ public class FireEffectSecondaryPixelWriter extends Application {
                     //randomize the bottom row of the fire buffer
                     Arrays.parallelSetAll(bottomRow, value -> Math.abs(32768 + rand.nextInt(65536)) % 256);
                     System.arraycopy(bottomRow, 0, fire, fireStartHeight, screenWidth);
+                    System.arraycopy(bottomRow, 0, fireBuf, fireStartHeight, screenWidth);
 
                     int a, b, row;
                     for (int y = 0; y < screenHeight - 1; y++) {
@@ -86,7 +87,7 @@ public class FireEffectSecondaryPixelWriter extends Application {
                             a = (y + 1) % screenHeight * screenWidth;
                             b = (x) % screenWidth;
                             row = y * screenWidth;
-                            fire[row + x]
+                            fireBuf[row + x] = fire[row + x]
                                     = ((fire[a + ((x - 1 + screenWidth) % screenWidth)]
                                     + fire[((y + 2) % screenHeight) * screenWidth + b]
                                     + fire[a + ((x + 1) % screenWidth)]
@@ -112,28 +113,17 @@ public class FireEffectSecondaryPixelWriter extends Application {
 //
 //                    }
 
-                    int c, pAsInt, r2, g2, b2, newPixel;
-                    for (int z = 0; z < fire.length; z++) {
-                        c = fire[z];
-                        pAsInt = paletteAsInts[c];
-                        r2 = (pAsInt << 16);
-                        g2 = (pAsInt << 8);
-                        b2 = pAsInt;
-                        newPixel = (0xFF<<24) | r2 | g2 | b2;
-                        //fireBuf[z] = newPixel;
+                    Arrays.setAll(fireBuf, i -> {
+                        int pAsInt3 = paletteAsInts[fireBuf[i]];
+                        int r3 = (pAsInt3 << 16);
+                        int g3 = (pAsInt3 << 8);
+                        int b3 = pAsInt3;
+                        return (0xFF<<24) | r3 | g3 | b3;
+                    });
 
-                        // Not sure if there is an issue with the timing when render thread
-                        // is waiting when the system.out is slowing the worker thread the output is different.
-                        //System.out.println("pAsInt=" + pAsInt + " newPixel=" + newPixel + " " + INTtoRGB(newPixel));
-
-                        pwBuffer.setArgb(z%screenWidth, (z/screenWidth), newPixel);
-
-                        //pwBuffer.setColor(z%screenWidth, (z/screenWidth), INTtoRGB(pAsInt));
-                    }
-
-//                    synchronized (lock) {
-//                        pwBuffer.setPixels(0, 0, screenWidth, screenHeight-1, pixelFormat, fireBuf, 0, fireBuf.length);
-//                    }
+//              synchronized (lock) {
+                    pwBuffer.setPixels(0, 0, screenWidth, screenHeight, pixelFormat, fireBuf, 0, screenWidth);
+//              }
 //
 //                    pwBuffer.setPixels(0, 0, screenWidth, screenHeight, pixelFormat, fire2, 0, fire2.length);
 
