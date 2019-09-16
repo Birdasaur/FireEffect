@@ -79,32 +79,33 @@ public class FireEffectSecondaryPixelWriter extends Application {
                     //randomize the bottom row of the fire buffer
                     Arrays.parallelSetAll(bottomRow, value -> Math.abs(32768 + rand.nextInt(65536)) % 256);
                     System.arraycopy(bottomRow, 0, fire, fireStartHeight, screenWidth);
-                    System.arraycopy(bottomRow, 0, fireBuf, fireStartHeight, screenWidth);
 
                     int a, b, row;
                     for (int y = 0; y < screenHeight - 1; y++) {
                         for (int x = 0; x < screenWidth; x++) {
                             a = (y + 1) % screenHeight * screenWidth;
-                            b = (x) % screenWidth;
+                            b = x % screenWidth;
                             row = y * screenWidth;
-                            fireBuf[row + x] = fire[row + x]
+                            int index = row + x;
+                            int pixel = fire[index]
                                     = ((fire[a + ((x - 1 + screenWidth) % screenWidth)]
                                     + fire[((y + 2) % screenHeight) * screenWidth + b]
                                     + fire[a + ((x + 1) % screenWidth)]
                                     + fire[((y + 3) % screenHeight * screenWidth) + b])
                                     * 128) / 513;
-
+                            // pre populate the buffer
+                            fireBuf[index] = paletteAsInts[pixel];
                         }
                     }
 /////////////////////////////////////////////////////////////////////////////
-// Not sure why below is slower than above.
+// A) Not sure why below is slower than above.
 //                    int heightMinusOne = (screenHeight-1) * screenWidth;
 //                    for (int z = 0; z < heightMinusOne; z++) {
 //                            int y = z/screenWidth;
 //                            int a = (y + 1) % screenHeight * screenWidth;
 //                            int b = z % screenWidth;
 //                            //int row = z/screenWidth * screenWidth;
-//                            fire[z]
+//                            fireBuf[z] = fire[z]
 //                                    = ((fire[a + ((b - 1 + screenWidth) % screenWidth)]
 //                                    + fire[((y + 2) % screenHeight) * screenWidth + b]
 //                                    + fire[a + ((b + 1) % screenWidth)]
@@ -113,19 +114,23 @@ public class FireEffectSecondaryPixelWriter extends Application {
 //
 //                    }
 
-                    Arrays.setAll(fireBuf, i -> {
-                        int pAsInt3 = paletteAsInts[fireBuf[i]];
-                        int r3 = (pAsInt3 << 16);
-                        int g3 = (pAsInt3 << 8);
-                        int b3 = pAsInt3;
-                        return (0xFF<<24) | r3 | g3 | b3;
-                    });
+// B) Same as above (A) but the performance is the same.
+//                    Arrays.setAll(fire, i -> {
+////                        int y = i / screenWidth;
+////                        int x = i % screenWidth;
+//                        //int index = y + x;
+//                        int pixel = ((fire[((i / screenWidth + 1) % screenHeight * screenWidth) + ((i % screenWidth - 1 + screenWidth) % screenWidth)]
+//                                + fire[((i / screenWidth + 2) % screenHeight * screenWidth) + ((i % screenWidth) % screenWidth)]
+//                                + fire[((i / screenWidth + 1) % screenHeight * screenWidth) + ((i % screenWidth + 1) % screenWidth)]
+//                                + fire[((i / screenWidth + 3) % screenHeight * screenWidth) + ((i % screenWidth) % screenWidth)]) << 7) / 513;
+//                        fireBuf[i] = pixel;
+//                        return pixel;
+//                    });
+
 
 //              synchronized (lock) {
                     pwBuffer.setPixels(0, 0, screenWidth, screenHeight, pixelFormat, fireBuf, 0, screenWidth);
 //              }
-//
-//                    pwBuffer.setPixels(0, 0, screenWidth, screenHeight, pixelFormat, fire2, 0, fire2.length);
 
                     elapseTime = System.currentTimeMillis() - startTime;
                     System.out.println("Worker thread takes : " + elapseTime + "ms");
@@ -177,12 +182,16 @@ public class FireEffectSecondaryPixelWriter extends Application {
             //pal[x] = rgbToInt(Color.rgb(x, x, x));
             double brightness = Math.min(255, x*2) / 255.0;
             Color color = Color.hsb(x / 3.0, 1.0, brightness , 1);
-            pal[x] = rgbToInt(color);
-            //System.out.println("pal[x] " + color + " int is " + pal[x]);
+
+//            pal[x] = rgbToInt(color); // alpha is set to zero.
+            pal[x] = rgbToInt(color) ^ 0xFF000000; // xor to make opacity 1.
+//            pal[x] = (color.hashCode() >>> 8) ^ 0xFF000000;
         }
         //if (true) throw new NullPointerException();
         return pal;
     }
+
+    // @todo Alpha is ignored  (JavaFX Color.hashcode integer isn't the same) rgba vs argb
     private static int rgbToInt(Color colorRGB) {
       return 65536 * (int)(colorRGB.getRed()*255) + 256 * (int)(colorRGB.getGreen()*255) + (int)(colorRGB.getBlue()*255);
     }
