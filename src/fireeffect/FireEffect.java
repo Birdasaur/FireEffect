@@ -15,6 +15,10 @@ import java.util.Arrays;
 import java.util.Random;
 import static javafx.application.Application.launch;
 import javafx.beans.property.SimpleBooleanProperty;
+import javafx.collections.FXCollections;
+import javafx.geometry.Insets;
+import javafx.scene.control.ChoiceBox;
+import javafx.scene.control.Label;
 import javafx.scene.control.RadioButton;
 import javafx.scene.control.ToggleGroup;
 import javafx.scene.layout.HBox;
@@ -27,6 +31,7 @@ public class FireEffect extends Application {
     SimpleBooleanProperty classic = new SimpleBooleanProperty(true);
     Canvas canvas;
     int[] paletteAsInts; //this will contain the color palette
+    int shift1, shift2, shift3;
 
     @Override
     public void start(Stage primaryStage) {
@@ -38,7 +43,29 @@ public class FireEffect extends Application {
         RadioButton wavesRB = new RadioButton("Waves of Fire");
         ToggleGroup tg = new ToggleGroup();
         tg.getToggles().addAll(classicRB, wavesRB);
-        HBox toggleBox = new HBox(10, classicRB, wavesRB);
+        
+        ChoiceBox<Integer> shift1ChoiceBox = new ChoiceBox<>(
+            FXCollections.observableArrayList(
+                -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16));
+        shift1ChoiceBox.setOnAction(event -> shift1 = shift1ChoiceBox.getValue());
+        shift1ChoiceBox.getSelectionModel().select(17);
+        
+        ChoiceBox<Integer> shift2ChoiceBox = new ChoiceBox<>(
+            FXCollections.observableArrayList(
+                -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16));
+        shift2ChoiceBox.setOnAction(event -> shift2 = shift2ChoiceBox.getValue());
+        shift2ChoiceBox.getSelectionModel().select(9);
+        ChoiceBox<Integer> shift3ChoiceBox = new ChoiceBox<>(
+            FXCollections.observableArrayList(
+                -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16));
+        shift3ChoiceBox.setOnAction(event -> shift3 = shift3ChoiceBox.getValue());
+        shift3ChoiceBox.getSelectionModel().select(1);
+        
+        HBox toggleBox = new HBox(10, classicRB, wavesRB, 
+            new Label("Wave Shift 1"), shift1ChoiceBox, 
+            new Label("Wave Shift 2"), shift2ChoiceBox, 
+            new Label("Wave Shift 3"), shift3ChoiceBox);
+        toggleBox.setPadding(new Insets(5));
         root.setTop(toggleBox);
         Scene scene = new Scene(root, Color.BLACK);
         initCanvas();
@@ -64,7 +91,6 @@ public class FireEffect extends Application {
         int[] fireBuf = new int[screenHeight * screenWidth];
         int[] bottomRow = new int[screenWidth];
         
-//        int[] paletteAsInts; //this will contain the color palette
         WritableImage writableImage = new WritableImage(screenWidth, screenHeight);
         PixelWriter pwBuffer = writableImage.getPixelWriter();
         PixelReader prBuffer = writableImage.getPixelReader();
@@ -73,15 +99,12 @@ public class FireEffect extends Application {
         GraphicsContext gc = canvas.getGraphicsContext2D();
         PixelWriter pw = gc.getPixelWriter();
         
-        
         paletteAsInts = generateArgbPalette(256);
 
         Task fireTask = new Task() {
             @Override
             protected Void call() throws Exception {
                 Random rand = new Random();
-                //random latch
-                boolean latch = true;
                 long startTime = 0;
                 long elapseTime = 0;
                 int fireStartHeight = (screenHeight - 1) * screenWidth;
@@ -93,7 +116,6 @@ public class FireEffect extends Application {
                     //randomize the bottom row of the fire buffer
                     Arrays.parallelSetAll(bottomRow, value -> Math.abs(32768 + rand.nextInt(65536)) % 256);
                     System.arraycopy(bottomRow, 0, fire, fireStartHeight, screenWidth);
-//                    System.arraycopy(bottomRow, 0, fireBuf, fireStartHeight, screenWidth);
 
                     int a, b, row, index, pixel;
                     
@@ -116,7 +138,6 @@ public class FireEffect extends Application {
                     pwBuffer.setPixels(0, 0, screenWidth, screenHeight, pixelFormat, fireBuf, 0, screenWidth);
                     elapseTime = System.currentTimeMillis() - startTime;
                     System.out.println("Worker thread takes : " + elapseTime + "ms");
-                    //System.out.println(counter++);
                     Thread.sleep(33);
                 }
                 return null;
@@ -148,12 +169,14 @@ public class FireEffect extends Application {
     private int getPaletteValue(int pixelIndex) {
         if(classic.get())  
             return paletteAsInts[pixelIndex];
-        else {
-            return  
-                paletteAsInts[pixelIndex] << 16 |
-                paletteAsInts[pixelIndex] << 8 | 
-                paletteAsInts[pixelIndex];
-        }
+        int value = 0;
+        if(shift1 > -1)
+            value |= paletteAsInts[pixelIndex] << shift1; 
+        if(shift2 > -1)
+            value |= paletteAsInts[pixelIndex] << shift2; 
+        if(shift3 > -1)
+            value |= paletteAsInts[pixelIndex] << shift3;
+        return value;
     }
     
     private int[] generateArgbPalette(int max ) {
