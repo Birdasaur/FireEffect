@@ -1,4 +1,5 @@
 package fireeffect;
+import java.nio.ByteBuffer;
 import javafx.animation.AnimationTimer;
 import javafx.application.Application;
 import javafx.concurrent.Task;
@@ -13,7 +14,10 @@ import javafx.stage.Stage;
 import java.nio.IntBuffer;
 import java.util.Arrays;
 import java.util.Random;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import static javafx.application.Application.launch;
+import javafx.application.Platform;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.collections.FXCollections;
 import javafx.geometry.Insets;
@@ -22,7 +26,6 @@ import javafx.scene.control.Label;
 import javafx.scene.control.RadioButton;
 import javafx.scene.control.ToggleGroup;
 import javafx.scene.layout.HBox;
-import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 /**
  *
@@ -32,23 +35,32 @@ public class ResizableFireEffect extends Application {
 
     SimpleBooleanProperty classic = new SimpleBooleanProperty(true);
     SimpleBooleanProperty resizing = new SimpleBooleanProperty(false);
+    SimpleBooleanProperty computing = new SimpleBooleanProperty(false);
+    SimpleBooleanProperty rendering = new SimpleBooleanProperty(false);
+    
     Canvas canvas;
     int[] paletteAsInts; //this will contain the color palette
     int shift1, shift2, shift3;  //cheesy way to use bit shifting to make waves
 
     int screenWidth, screenHeight;
+    int minWidth = 10, minHeight = 10;
+    
     int[] fire; //this buffer will contain the fire
     int[] fireBuf; //double buffer
     int[] bottomRow; //seeds of flames randomly generated
     WritableImage writableImage; //image to facilitate concurrent write/reads
     PixelWriter pwBuffer;
     PixelReader prBuffer;
+    GraphicsContext gc;
+    PixelWriter pw;
     
     
     @Override
     public void start(Stage primaryStage) {
         canvas = new Canvas(600, 600);
         VBox vb = new VBox(canvas);
+        vb.minWidth(minWidth);
+        vb.minHeight(minHeight);
         canvas.widthProperty().bind(vb.widthProperty());
         canvas.heightProperty().bind(vb.heightProperty());
         BorderPane root = new BorderPane(vb);
@@ -97,22 +109,31 @@ public class ResizableFireEffect extends Application {
     }
     private void reallocateBuffers(int width, int height) {
         resizing.set(true);
+//        //Gotta wait for any rendering threads to stop.
+//        while(rendering.get()) {
+//            try {
+//                Thread.sleep(10);
+//            } catch (InterruptedException ex) {
+//                Logger.getLogger(ResizableFireEffect.class.getName()).log(Level.SEVERE, null, ex);
+//                //@TODO SMP watchdog logic needed
+//            }
+//        }
         // Y-coordinate first because we use horizontal scanlines
-        screenWidth = width;
-        screenHeight = height;
+        screenWidth = width < minWidth ? minWidth : width;
+        screenHeight = height < minHeight ? minHeight : height;
         fire = new int[screenHeight * screenWidth];  //this buffer will contain the fire
         fireBuf = new int[screenHeight * screenWidth];
         bottomRow = new int[screenWidth];
         writableImage = new WritableImage(screenWidth, screenHeight);
         pwBuffer = writableImage.getPixelWriter();
         prBuffer = writableImage.getPixelReader();
+        gc = canvas.getGraphicsContext2D();
+        pw = gc.getPixelWriter();
         resizing.set(false);
     }
 
     private void initCanvas() {
         WritablePixelFormat<IntBuffer> pixelFormat = WritablePixelFormat.getIntArgbInstance();
-        GraphicsContext gc = canvas.getGraphicsContext2D();
-        PixelWriter pw = gc.getPixelWriter();
 
         //define the width and height of the screen and the buffers
         reallocateBuffers(600, 600);
@@ -132,38 +153,45 @@ public class ResizableFireEffect extends Application {
                 Random rand = new Random();
                 long startTime = 0;
                 long elapseTime = 0;
-                int fireStartHeight = (screenHeight - 1) * screenWidth;
                 //start the loop (one frame per loop)
+                int fireStartHeight, a, b, row, index, pixel;
+                int skipY = 1;
+                int skipX = 1;
                 while(!this.isCancelled() && !this.isDone()) {
                     if(!resizing.get()) {
-                        // Start stop watch
-                        startTime = System.currentTimeMillis();
+                        computing.set(true);
+                        try {
+                            // Start stop watch
+                            startTime = System.currentTimeMillis();
+                            fireStartHeight = (screenHeight - 1) * screenWidth;
+                            //randomize the bottom row of the fire buffer
+                            Arrays.parallelSetAll(bottomRow, value -> Math.abs(32768 + rand.nextInt(65536)) % 256);
+                            System.arraycopy(bottomRow, 0, fire, fireStartHeight, screenWidth);
 
-                        //randomize the bottom row of the fire buffer
-                        Arrays.parallelSetAll(bottomRow, value -> Math.abs(32768 + rand.nextInt(65536)) % 256);
-                        System.arraycopy(bottomRow, 0, fire, fireStartHeight, screenWidth);
-
-                        int a, b, row, index, pixel;
-
-                        for (int y = 0; y < screenHeight - 1; y++) {
-                            for (int x = 0; x < screenWidth; x++) {
-                                a = (y + 1) % screenHeight * screenWidth;
-                                b = x % screenWidth;
-                                row = y * screenWidth;
-                                index = row + x;
-                                pixel = fire[index]
-                                        = ((fire[a + ((x - 1 + screenWidth) % screenWidth)]
-                                        + fire[((y + 2) % screenHeight) * screenWidth + b]
-                                        + fire[a + ((x + 1) % screenWidth)]
-                                        + fire[((y + 3) % screenHeight * screenWidth) + b])
-                                        * 128) / 513;
-                                fireBuf[index] = getPaletteValue(pixel);
+                            for (int y = 0; y < screenHeight - 1; y++) {
+                                for (int x = 0; x < screenWidth; x++) {
+                                    a = (y + 1) % screenHeight * screenWidth;
+                                    b = x % screenWidth;
+                                    row = y * screenWidth;
+                                    index = row + x;
+                                    pixel = fire[index]
+                                            = ((fire[a + ((x - 1 + screenWidth) % screenWidth)]
+                                            + fire[((y + 2) % screenHeight) * screenWidth + b]
+                                            + fire[a + ((x + 1) % screenWidth)]
+                                            + fire[((y + 3) % screenHeight * screenWidth) + b])
+                                            * 128) / 513;
+                                    fireBuf[index] = getPaletteValue(pixel);
+                                }
                             }
-                        }
 
-                        pwBuffer.setPixels(0, 0, screenWidth, screenHeight, pixelFormat, fireBuf, 0, screenWidth);
-                        elapseTime = System.currentTimeMillis() - startTime;
-                        System.out.println("Worker thread takes : " + elapseTime + "ms");
+                            pwBuffer.setPixels(0, 0, screenWidth, screenHeight, pixelFormat, fireBuf, 0, screenWidth);
+                            elapseTime = System.currentTimeMillis() - startTime;
+                            System.out.println("Worker thread takes : " + elapseTime + "ms");
+                        } catch (Exception ex) {
+                            System.out.println("worker thread burp...");
+                        }
+                        
+                        computing.set(false);
                     }
                     Thread.sleep(33);
                 }
@@ -183,11 +211,19 @@ public class ResizableFireEffect extends Application {
             @Override
             public void handle(long now) {
                 if(now > lastTimerCall + ANIMATION_DELAY) {
-                    startTime = System.nanoTime();
-                    pw.setPixels(0, 0, screenWidth, screenHeight, prBuffer, 0, 0);
                     lastTimerCall = now;    //update for the next animation
-                    elapseTime = (System.nanoTime() - startTime)/1e6;
-                    System.out.println("UI Render thread takes : " + elapseTime + "ms");
+                    if(!resizing.get()) {
+                        rendering.set(true);
+                        startTime = System.nanoTime();
+                        try {
+                            pw.setPixels(0, 0, screenWidth, screenHeight, prBuffer, 0, 0);
+                        } catch (Exception ex) {
+                            System.out.println("animation timer burp...");
+                        }                        
+                        elapseTime = (System.nanoTime() - startTime)/1e6;
+                        System.out.println("UI Render thread takes : " + elapseTime + "ms");
+                        rendering.set(false);
+                    }
                 }
             }
         };
