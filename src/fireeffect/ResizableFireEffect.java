@@ -1,5 +1,4 @@
 package fireeffect;
-import java.nio.ByteBuffer;
 import javafx.animation.AnimationTimer;
 import javafx.application.Application;
 import javafx.concurrent.Task;
@@ -14,11 +13,7 @@ import javafx.stage.Stage;
 import java.nio.IntBuffer;
 import java.util.Arrays;
 import java.util.Random;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 import static javafx.application.Application.launch;
-import javafx.application.Platform;
-import javafx.beans.property.SimpleBooleanProperty;
 import javafx.collections.FXCollections;
 import javafx.geometry.Insets;
 import javafx.scene.control.ChoiceBox;
@@ -32,11 +27,10 @@ import javafx.scene.layout.VBox;
  * @author phillsm1
  */
 public class ResizableFireEffect extends Application {
-
-    SimpleBooleanProperty classic = new SimpleBooleanProperty(true);
-    SimpleBooleanProperty resizing = new SimpleBooleanProperty(false);
-    SimpleBooleanProperty computing = new SimpleBooleanProperty(false);
-    SimpleBooleanProperty rendering = new SimpleBooleanProperty(false);
+    boolean classic = true;
+    boolean resizing = false;
+    boolean computing = false; 
+    boolean rendering = false;
     
     Canvas canvas;
     int[] paletteAsInts; //this will contain the color palette
@@ -66,7 +60,7 @@ public class ResizableFireEffect extends Application {
         BorderPane root = new BorderPane(vb);
         RadioButton classicRB = new RadioButton("Classic flame");
         classicRB.setSelected(true);
-        classic.bind(classicRB.selectedProperty());
+        classicRB.selectedProperty().addListener(event -> classic = classicRB.isSelected());
         RadioButton wavesRB = new RadioButton("Waves of Fire");
         ToggleGroup tg = new ToggleGroup();
         tg.getToggles().addAll(classicRB, wavesRB);
@@ -108,7 +102,7 @@ public class ResizableFireEffect extends Application {
         launch(args);
     }
     private void reallocateBuffers(int width, int height) {
-        resizing.set(true);
+        resizing = true;
 //        //Gotta wait for any rendering threads to stop.
 //        while(rendering.get()) {
 //            try {
@@ -129,7 +123,7 @@ public class ResizableFireEffect extends Application {
         prBuffer = writableImage.getPixelReader();
         gc = canvas.getGraphicsContext2D();
         pw = gc.getPixelWriter();
-        resizing.set(false);
+        resizing = false;
     }
 
     private void initCanvas() {
@@ -152,46 +146,47 @@ public class ResizableFireEffect extends Application {
             protected Void call() throws Exception {
                 Random rand = new Random();
                 long startTime = 0;
+                long markTime = 0;
                 long elapseTime = 0;
                 //start the loop (one frame per loop)
-                int fireStartHeight, a, b, row, index, pixel;
-                int skipY = 1;
-                int skipX = 1;
+                int fireStartHeight;
+                int a, b;
+                int row, pixel;
                 while(!this.isCancelled() && !this.isDone()) {
-                    if(!resizing.get()) {
-                        computing.set(true);
-                        try {
-                            // Start stop watch
-                            startTime = System.currentTimeMillis();
-                            fireStartHeight = (screenHeight - 1) * screenWidth;
-                            //randomize the bottom row of the fire buffer
-                            Arrays.parallelSetAll(bottomRow, value -> Math.abs(32768 + rand.nextInt(65536)) % 256);
-                            System.arraycopy(bottomRow, 0, fire, fireStartHeight, screenWidth);
+                    if(!resizing) {
+                        computing = true;
+                        // Start stop watch
+                        startTime = System.currentTimeMillis();
+                        fireStartHeight = (screenHeight - 1) * screenWidth;
+                        //randomize the bottom row of the fire buffer
+                        Arrays.parallelSetAll(bottomRow, (int operand) -> Math.abs(32768 + rand.nextInt(65536)) % 256);
+                        System.arraycopy(bottomRow, 0, fire, fireStartHeight, screenWidth);
 
-                            for (int y = 0; y < screenHeight - 1; y++) {
-                                for (int x = 0; x < screenWidth; x++) {
-                                    a = (y + 1) % screenHeight * screenWidth;
-                                    b = x % screenWidth;
-                                    row = y * screenWidth;
-                                    index = row + x;
-                                    pixel = fire[index]
-                                            = ((fire[a + ((x - 1 + screenWidth) % screenWidth)]
-                                            + fire[((y + 2) % screenHeight) * screenWidth + b]
-                                            + fire[a + ((x + 1) % screenWidth)]
-                                            + fire[((y + 3) % screenHeight * screenWidth) + b])
-                                            * 128) / 513;
-                                    fireBuf[index] = getPaletteValue(pixel);
-                                }
+                        markTime = System.currentTimeMillis();
+                        for (int y = 0; y < screenHeight - 1; y++) {
+                            a = (y + 1) % screenHeight * screenWidth;
+                            row = y * screenWidth;
+                            for (int x = 0; x < screenWidth; x++) {
+                                b = x % screenWidth;
+                                pixel = fire[row + x]
+                                      = ((fire[a + ((x - 1 + screenWidth) % screenWidth)]
+                                        + fire[((y + 2) % screenHeight) * screenWidth + b]
+                                        + fire[a + ((x + 1) % screenWidth)]
+                                        + fire[((y + 3) % screenHeight * screenWidth) + b])
+                                        * 128) / 513;
+                                fireBuf[row + x] = paletteAsInts[pixel];
                             }
-
-                            pwBuffer.setPixels(0, 0, screenWidth, screenHeight, pixelFormat, fireBuf, 0, screenWidth);
-                            elapseTime = System.currentTimeMillis() - startTime;
-                            System.out.println("Worker thread takes : " + elapseTime + "ms");
-                        } catch (Exception ex) {
-                            System.out.println("worker thread burp...");
                         }
-                        
-                        computing.set(false);
+
+                        elapseTime = System.currentTimeMillis() - markTime;
+                        System.out.println("Convolution takes : " + elapseTime + "ms");
+
+//                            markTime = System.currentTimeMillis();
+                        pwBuffer.setPixels(0, 0, screenWidth, screenHeight, pixelFormat, fireBuf, 0, screenWidth);
+//                            elapseTime = System.currentTimeMillis() - markTime;
+//                            System.out.println("Convolution + setPixels takes : " + elapseTime + "ms");
+                       
+                        computing = false;
                     }
                     Thread.sleep(33);
                 }
@@ -212,8 +207,8 @@ public class ResizableFireEffect extends Application {
             public void handle(long now) {
                 if(now > lastTimerCall + ANIMATION_DELAY) {
                     lastTimerCall = now;    //update for the next animation
-                    if(!resizing.get()) {
-                        rendering.set(true);
+                    if(!resizing) {
+                        rendering = true;
                         startTime = System.nanoTime();
                         try {
                             pw.setPixels(0, 0, screenWidth, screenHeight, prBuffer, 0, 0);
@@ -222,7 +217,7 @@ public class ResizableFireEffect extends Application {
                         }                        
                         elapseTime = (System.nanoTime() - startTime)/1e6;
                         System.out.println("UI Render thread takes : " + elapseTime + "ms");
-                        rendering.set(false);
+                        rendering = false;
                     }
                 }
             }
@@ -230,16 +225,16 @@ public class ResizableFireEffect extends Application {
         at.start();
     }
     private int getPaletteValue(int pixelIndex) {
-        if(classic.get())  
+//        if(classic.get())  
             return paletteAsInts[pixelIndex];
-        int value = 0;
-        if(shift1 > -1)
-            value |= paletteAsInts[pixelIndex] << shift1; 
-        if(shift2 > -1)
-            value |= paletteAsInts[pixelIndex] << shift2; 
-        if(shift3 > -1)
-            value |= paletteAsInts[pixelIndex] << shift3;
-        return value;
+//        int value = 0;
+//        if(shift1 > -1)
+//            value |= paletteAsInts[pixelIndex] << shift1; 
+//        if(shift2 > -1)
+//            value |= paletteAsInts[pixelIndex] << shift2; 
+//        if(shift3 > -1)
+//            value |= paletteAsInts[pixelIndex] << shift3;
+//        return value;
     }
     
     private int[] generateArgbPalette(int max ) {
