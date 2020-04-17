@@ -83,14 +83,6 @@ public class DebounceDispatcher<T> implements ChangeListener<T> {
         });
         Timeline timeline = new Timeline(delayedAction);
 
-        timeline.statusProperty().addListener(obs -> {
-            // if a timeline has stopped just remove it from the delayedActions list.
-            if (timeline.getStatus().equals(Animation.Status.STOPPED)) {
-                System.out.println(delayedAction.getName() + " " + timeline.getStatus());
-                delayedActions.remove(timeline);
-            }
-        });
-
         // spawn latest task.
         delayedActions.add(timeline);
         timeline.playFromStart();

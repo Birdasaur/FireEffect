@@ -21,42 +21,48 @@ import javafx.scene.paint.Color;
 import javafx.stage.Stage;
 
 import java.nio.IntBuffer;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Queue;
-import java.util.Random;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 /**
- * TODO fix race condition. Make the reallocation and effect more seemless.
- * @deprecated WIP or rework.
- * @author carldea
+ * Fire structure that gets convoluted.
+ * @author phillsm1
+ * @author cpdea
  */
+
 public class ResizableFireEffect extends Application {
+    FireModel fireModel = null;
 
     boolean classic = true;
-    volatile boolean resizing = false;
 
     int shift1, shift2, shift3;  //cheesy way to use bit shifting to make waves
 
-    int screenWidth, screenHeight; // The canvas dimensions
-    final int MIN_WIDTH = 10, MIN_HEIGHT = 10; // minimum size the canvas can be
     final long DEFAULT_WORKER_SLEEP = 25; // milliseconds
-    Canvas canvas;      // main render surface displayed to the user
-    int[] paletteAsInts; //this will contain a 32 bit (integer) array of colors for the palette
 
-    int[] fire;         //this buffer will contain the fire
-    int[] fireBuf;      //double buffer
-    int[] bottomRow;    //seeds of flames randomly generated
+    Canvas canvas;      // main render surface displayed to the user
 
     // create a worker queue, basically a consumer producer pattern
-    Queue<WritableImage> workerQueue = new ConcurrentLinkedQueue<>();
+    Queue<ScreenDimension> workerQueue = new ConcurrentLinkedQueue<>();
     Queue<WritableImage> renderQueue = new ConcurrentLinkedQueue<>();
+
+    private FireModel getFireModel() {
+        if (fireModel==null) {
+            fireModel = new FireModel();
+        }
+        return fireModel;
+    }
+
+    private void setFireModel(FireModel fireModel) {
+        this.fireModel = fireModel;
+    }
 
     @Override
     public void start(Stage primaryStage) {
+        // initial fire model
+        setFireModel(new FireModel(800, 600));
 
         // Create center area
         StackPane stackPane = new StackPane();
@@ -79,7 +85,7 @@ public class ResizableFireEffect extends Application {
 
         shift1ChoiceBox.setOnAction(event -> shift1 = shift1ChoiceBox.getValue());
         shift1ChoiceBox.getSelectionModel().select(17);
-        
+
         ChoiceBox<Integer> shift2ChoiceBox = new ChoiceBox<>(FXCollections.observableArrayList(integerList));
         shift2ChoiceBox.setOnAction(event -> shift2 = shift2ChoiceBox.getValue());
         shift2ChoiceBox.getSelectionModel().select(9);
@@ -89,27 +95,18 @@ public class ResizableFireEffect extends Application {
         shift3ChoiceBox.getSelectionModel().select(1);
 
         // Create top controls area
-        HBox toggleBox = new HBox(10, classicRB, wavesRB, 
-            new Label("Wave Shift 1"), shift1ChoiceBox, 
-            new Label("Wave Shift 2"), shift2ChoiceBox, 
-            new Label("Wave Shift 3"), shift3ChoiceBox);
+        HBox toggleBox = new HBox(10, classicRB, wavesRB,
+                new Label("Wave Shift 1"), shift1ChoiceBox,
+                new Label("Wave Shift 2"), shift2ChoiceBox,
+                new Label("Wave Shift 3"), shift3ChoiceBox);
         toggleBox.setPadding(new Insets(5));
         root.setTop(toggleBox);
 
         // Once things are shown (scene) the size of the canvas can be created.
-        primaryStage.setOnShown(winEvents -> initCanvas(primaryStage));
+        primaryStage.setOnShown(winEvents -> initCanvas(primaryStage, toggleBox.heightProperty().intValue()));
 
         // Create the default size of the scene (view port inside stage)
         Scene scene = new Scene(root, 800, 600, Color.BLACK);
-
-        // Canvas width is the current stage's width
-        canvas.widthProperty().bind(scene.widthProperty());
-
-        // Canvas is the scene's height minus the top area.
-        canvas.heightProperty()
-                .bind(scene.heightProperty()
-                .subtract(toggleBox.heightProperty()));
-
 
         primaryStage.setTitle("FireEffect");
         primaryStage.setScene(scene);
@@ -122,119 +119,67 @@ public class ResizableFireEffect extends Application {
     public static void main(String[] args) {
         launch(args);
     }
-    private void reallocateBuffers(int width, int height) {
-        resizing = true;
 
-        // Y-coordinate first because we use horizontal scanlines
-        screenWidth = width < MIN_WIDTH ? MIN_WIDTH : width;
-        screenHeight = height < MIN_HEIGHT ? MIN_HEIGHT : height;
+    private void reallocateIfDiff() {
+        FireModel curfireModel = getFireModel();
 
-        // Remove any buffered writable images
-        int numberOfBuffers = workerQueue.size() + renderQueue.size();
-        System.out.println("numberOfBuffers: " + numberOfBuffers);
-        workerQueue.clear();
-        renderQueue.clear();
-        for (int i=0; i<numberOfBuffers; i++) {
-            workerQueue.add(new WritableImage(screenWidth, screenHeight));
+        // check if a new screen dimension is available
+        ScreenDimension newScreenDimension = workerQueue.poll();
+
+        // If not equal reallocate() new one. Also make sure screen dimensions are at least 4x4.
+        if (newScreenDimension != null &&
+                !newScreenDimension.equals(curfireModel.screenWidth, curfireModel.screenHeight) &&
+                newScreenDimension.w > 4 && newScreenDimension.h > 4) {
+
+            curfireModel.cleanup();
+            workerQueue.clear();
+            FireModel fireModel = new FireModel(newScreenDimension.w, newScreenDimension.h);
+            setFireModel(fireModel);
         }
-
-        // Reallocate convolution pixel arrays
-        fire = new int[screenHeight * screenWidth];  //this buffer will contain the fire
-        fireBuf = new int[screenHeight * screenWidth];
-        bottomRow = new int[screenWidth];
-
-        resizing = false;
     }
 
     /**
      * This is called after the Stage has been shown to determine the size of the canvas.
      * @param primaryStage
      */
-    private void initCanvas(Stage primaryStage) {
-        // Change the dimensions of the arrays based on the render canvas area.
-        reallocateBuffers((int) canvas.getWidth(), (int) canvas.getHeight());
-
-        // Add a (one) buffer for the worker thread to fill with pixels.
-        workerQueue.add(new WritableImage(screenWidth, screenHeight));
-        workerQueue.add(new WritableImage(screenWidth, screenHeight));
-        workerQueue.add(new WritableImage(screenWidth, screenHeight));
-
-        // Generate a palette of random hsb based colors.
-        paletteAsInts = generateArgbPalette(256);
+    private void initCanvas(Stage primaryStage, int heightTop) {
+        reallocateIfDiff();
 
         // Worker thread task to perform convolution (using CPU one thread)
         Task fireTask = new Task() {
             @Override
             protected Void call() throws Exception {
-                Random rand = new Random();
+
                 long startTime = 0;
                 long markTime = 0;
                 long elapseTime = 0;
-                //start the loop (one frame per loop)
-                int fireStartHeight;
-                int a, b;
-                int row, pixel;
+
                 // argb writable surface as opposed to a rgba.
                 WritablePixelFormat<IntBuffer> pixelFormat = WritablePixelFormat.getIntArgbInstance();
 
                 while(!this.isCancelled() && !this.isDone()) {
-                    if (resizing) {
-                        continue; // if still resizing ignore calculations
-                    }
-
                     // Start stop watch
                     startTime = System.currentTimeMillis();
-
+                    reallocateIfDiff();
+                    FireModel fireModel = getFireModel();
                     // Randomize the bottom row of the fire buffer
-                    Arrays.parallelSetAll(bottomRow, (int operand) -> Math.abs(32768 + rand.nextInt(65536)) % 256);
-                    fireStartHeight = (screenHeight - 1) * screenWidth;
-                    System.arraycopy(bottomRow, 0, fire, fireStartHeight, screenWidth);
+                    fireModel.genRandomFireRowWidth();
+                    fireModel.copyFireRowBottom();
 
                     markTime = System.currentTimeMillis();
 
-                    // 3x3 convolution of pixels (height minus one)
-                    for (int y = 0; y < screenHeight - 1; y++) {
-                        a = (y + 1) % screenHeight * screenWidth;
-                        row = y * screenWidth;
-                        for (int x = 0; x < screenWidth; x++) {
-                            b = x % screenWidth;
-                            pixel = fire[row + x]
-                                  = ((fire[a + ((x - 1 + screenWidth) % screenWidth)]
-                                    + fire[((y + 2) % screenHeight) * screenWidth + b]
-                                    + fire[a + ((x + 1) % screenWidth)]
-                                    + fire[((y + 3) % screenHeight * screenWidth) + b])
-                                    * 128) / 513;
-                            fireBuf[row + x] = getPaletteValue(pixel);
-                        }
-                    }
+                    fireModel.classic = classic;
+                    fireModel.shift1 = shift1;
+                    fireModel.shift2 = shift2;
+                    fireModel.shift3 = shift3;
+
+                    fireModel.convolution();
+
+                    // let Animation thread draw
+                    renderQueue.add(fireModel.copyWritable(pixelFormat));
 
                     elapseTime = System.currentTimeMillis() - markTime;
                     System.out.println("Convolution takes : " + elapseTime + "ms");
-
-                    try {
-                        WritableImage writableImage = workerQueue.poll();
-                        if (writableImage != null){
-                            PixelWriter pwBuffer = writableImage.getPixelWriter();
-                            if (isSameDimensions(writableImage)) {
-                                System.out.println("1 [same size] Worker sends to render thread");
-                                pwBuffer.setPixels(0, 0, screenWidth, screenHeight, pixelFormat, fireBuf, 0, screenWidth);
-                                renderQueue.add(writableImage);
-                                System.out.println("2 [same size] Worker sends to render thread");
-                            } else {
-                                // add
-                                System.out.println("1 [invalid size] add to Worker queue");
-                                workerQueue.add(writableImage);
-                                reallocateBuffers(screenWidth, screenHeight);
-                                System.out.println("2 [invalid size] add to Worker queue");
-                            }
-                        } else {
-                            System.out.println("Waiting for renderer to put something in work queue.");
-                            continue;
-                        }
-                    } catch (Throwable th) {
-                        // When this happens setPixels() array is out of bounds.
-                        th.printStackTrace();
-                    }
                     elapseTime = System.currentTimeMillis() - startTime;
                     System.out.println("Convolution + setPixels takes : " + elapseTime + "ms");
 
@@ -245,7 +190,12 @@ public class ResizableFireEffect extends Application {
         };
 
         // @TODO possibly make an executor thread pool to distribute work
-        // to put more on the render queue to appear faster
+        // to put more on the render queue to appear faster. Right now the worker takes time to compute image.
+        fireTask.setOnFailed(wse -> {
+            System.out.println(wse.getEventType().getName());
+            fireTask.getException().printStackTrace();
+        });
+
         Thread thread = new Thread(fireTask);
         thread.setDaemon(true);
         thread.start();
@@ -264,36 +214,24 @@ public class ResizableFireEffect extends Application {
             public void handle(long now) {
                 if(now > lastTimerCall + ANIMATION_DELAY) {
                     lastTimerCall = now;    //update for the next animation
+                    startTime = System.nanoTime();
+                    System.out.println("Num items to render: " + renderQueue.size());
 
-                    if(!resizing) {
-                        startTime = System.nanoTime();
-                        try {
-                            PixelWriter pw = canvas.getGraphicsContext2D().getPixelWriter();
-                            System.out.println("Num items to render: " + renderQueue.size());
+                    // grab work to do
+                    WritableImage fireImageFrame = renderQueue.poll();
 
-                            // grab work to do
-                            WritableImage fireImageFrame = renderQueue.poll();
-
-                            // if their is work to do
-                            if (fireImageFrame != null) {
-                                if (isSameDimensions(fireImageFrame)) {
-                                    // fast copy (uses the GPU)
-                                    pw.setPixels(0, 0, screenWidth, screenHeight, fireImageFrame.getPixelReader(), 0, 0);
-                                }
-                                workerQueue.add(fireImageFrame);
-                            } else {
-                                System.out.println("No work to draw");
-                                return;
-                            }
-                        } catch (Throwable th) {
-                            // should never happen
-                            th.printStackTrace();
-                            System.out.println("animation timer burp...");
-                        }                        
-                        elapseTime = (System.nanoTime() - startTime)/1e6;
-                        System.out.println("UI Render thread takes : " + elapseTime + "ms");
-
+                    // if there is work to do copy to canvas pixel writer.
+                    if (fireImageFrame != null) {
+                        canvas.setWidth(fireImageFrame.getWidth());
+                        canvas.setHeight(fireImageFrame.getHeight());
+                        PixelWriter pw = canvas.getGraphicsContext2D().getPixelWriter();
+                        pw.setPixels(0, 0, (int) fireImageFrame.getWidth(), (int) fireImageFrame.getHeight(), fireImageFrame.getPixelReader(), 0, 0);
+                    } else {
+                        System.out.println("No work to draw");
+                        return;
                     }
+                    elapseTime = (System.nanoTime() - startTime)/1e6;
+                    System.out.println("UI Render thread takes : " + elapseTime + "ms");
                 }
             }
         };
@@ -306,80 +244,16 @@ public class ResizableFireEffect extends Application {
                     // This action is run on the JavaFX ui thread.
                     System.out.println(Thread.currentThread().getName() + " reallocate() called.");
 
-                    // stop animation timer
-                    at.stop();
+                    int w = (int) Math.ceil(primaryStage.getScene().getWidth());
+                    int h = (int) Math.ceil(primaryStage.getScene().getHeight() - heightTop);
+                    workerQueue.add(new ScreenDimension(w,h));
 
-                    int w = (int) canvas.getWidth();
-                    int h = (int) canvas.getHeight();
-
-                    // reallocate buffers, palettes, etc.
-                    reallocateBuffers(w, h);
-
-                    // restart animation timer
-                    at.start();
-
+                    System.out.println(workerQueue.size());
                     System.out.println(String.format("Reallocate arrays [%s by %s]", w, h));
                 });
 
         // Add debounce dispatcher to listen for width and hight changes.
-        primaryStage.widthProperty().addListener(resizeListener);
-        primaryStage.heightProperty().addListener(resizeListener);
+        primaryStage.getScene().widthProperty().addListener(resizeListener);
+        primaryStage.getScene().heightProperty().addListener(resizeListener);
     }
-
-    /**
-     * Just in case the dimension are different caller
-     * can avoid setPixels() It kills the running thread.
-     * @param fireImageFrame
-     * @return
-     */
-    private boolean isSameDimensions(WritableImage fireImageFrame) {
-        return (int) fireImageFrame.getWidth() == screenWidth &&
-               (int) fireImageFrame.getHeight() == screenHeight;
-    }
-
-    private int getPaletteValue(int pixelIndex) {
-        if(classic)
-            return paletteAsInts[pixelIndex];
-        int value = 0;
-        if(shift1 > -1)
-            value |= paletteAsInts[pixelIndex] << shift1;
-        if(shift2 > -1)
-            value |= paletteAsInts[pixelIndex] << shift2;
-        if(shift3 > -1)
-            value |= paletteAsInts[pixelIndex] << shift3;
-        return value;
-    }
-    
-    private int[] generateArgbPalette(int max ) {
-        int [] pal = new int[max];
-        //generate the palette
-        for (int x = 0; x < max; x++) {
-            //HSLtoRGB is used to generate colors:
-            //Hue goes from 0 to 85: red to yellow
-            //Saturation is always the maximum: 255
-            //Lightness is 0..255 for x=0..128, and 255 for x=128..255
-            //color = HSLtoRGB(ColorHSL(x / 3, 255, std::min(255, x * 2)));
-            //set the palette to the calculated RGB value
-            //palette[x] = RGBtoINT();
-            double brightness = Math.min(255, x*2) / 255.0;
-            Color color = Color.hsb(x / 3.0, 1.0, brightness , 1);
-            pal[x] = rgbToIntArgb(color);            
-        }
-        return pal;
-    }
-
-    private static int rgbToIntArgb(Color colorRGB) {
-      return (int)(colorRGB.getOpacity()*255) << 24 |
-             (int)(colorRGB.getRed()    *255) << 16 | 
-             (int)(colorRGB.getGreen()  *255) <<  8 | 
-             (int)(colorRGB.getBlue()   *255);
-    }    
-
-    static Color INTtoRGB(int colorINT) {
-      return new Color(
-        (colorINT / 65536) % 256, 
-        (colorINT / 256) % 256,
-        colorINT % 256,
-        1.0);
-    }    
 }    
