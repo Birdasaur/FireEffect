@@ -30,8 +30,9 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 /**
- *
- * @author phillsm1
+ * TODO fix race condition. Make the reallocation and effect more seemless.
+ * @deprecated WIP or rework.
+ * @author carldea
  */
 public class ResizableFireEffect extends Application {
 
