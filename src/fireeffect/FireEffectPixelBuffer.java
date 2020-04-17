@@ -81,7 +81,7 @@ public class FireEffectPixelBuffer extends Application {
         Scene scene = new Scene(root, Color.BLACK);
         initCanvas();
         workerTimes.addListener( listener -> canvas.getGraphicsContext2D().strokeText("Worker time spent: " + workerTimes.get() + "ms", 10, 10));
-        primaryStage.setTitle("FireEffect");
+        primaryStage.setTitle("FireEffect using PixelBuffer");
         primaryStage.setScene(scene);
         primaryStage.show();
     }
