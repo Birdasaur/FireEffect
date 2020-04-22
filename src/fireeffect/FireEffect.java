@@ -1,6 +1,7 @@
 package fireeffect;
 import javafx.animation.AnimationTimer;
 import javafx.application.Application;
+import javafx.beans.property.SimpleLongProperty;
 import javafx.concurrent.Task;
 import javafx.scene.Scene;
 import javafx.scene.canvas.Canvas;
@@ -11,9 +12,7 @@ import javafx.scene.paint.Color;
 import javafx.stage.Stage;
 
 import java.nio.IntBuffer;
-import java.util.Arrays;
 import java.util.Random;
-import static javafx.application.Application.launch;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.collections.FXCollections;
 import javafx.geometry.Insets;
@@ -23,8 +22,10 @@ import javafx.scene.control.RadioButton;
 import javafx.scene.control.ToggleGroup;
 import javafx.scene.layout.HBox;
 /**
- *
+ * Demo of fire effects with standard Java 8 using a writable image.
+ * A 600 x 600 canvas, worker thread with a 17ms sleep and animation timer at 16ms delay.
  * @author phillsm1
+ * @author carldea
  */
 public class FireEffect extends Application {
 
@@ -32,6 +33,8 @@ public class FireEffect extends Application {
     Canvas canvas;
     int[] paletteAsInts; //this will contain the color palette
     int shift1, shift2, shift3;
+    SimpleLongProperty workerTimes = new SimpleLongProperty(0);
+    long workTimesMillis = 0;
 
     @Override
     public void start(Stage primaryStage) {
@@ -69,6 +72,7 @@ public class FireEffect extends Application {
         root.setTop(toggleBox);
         Scene scene = new Scene(root, Color.BLACK);
         initCanvas();
+        workerTimes.addListener( listener -> canvas.getGraphicsContext2D().strokeText("Worker time spent: " + workerTimes.get() + "ms", 10, 10));
         primaryStage.setTitle("FireEffect");
         primaryStage.setScene(scene);
         primaryStage.show();
@@ -89,7 +93,7 @@ public class FireEffect extends Application {
         // Y-coordinate first because we use horizontal scanlines
         int[] fire = new int[screenHeight * screenWidth];  //this buffer will contain the fire
         int[] fireBuf = new int[screenHeight * screenWidth];
-        int[] bottomRow = new int[screenWidth];
+        //int[] bottomRow = new int[screenWidth];
         
         WritableImage writableImage = new WritableImage(screenWidth, screenHeight);
         PixelWriter pwBuffer = writableImage.getPixelWriter();
@@ -114,9 +118,11 @@ public class FireEffect extends Application {
                     startTime = System.currentTimeMillis();
 
                     //randomize the bottom row of the fire buffer
-                    Arrays.parallelSetAll(bottomRow, value -> Math.abs(32768 + rand.nextInt(65536)) % 256);
-                    System.arraycopy(bottomRow, 0, fire, fireStartHeight, screenWidth);
-
+//                    Arrays.parallelSetAll(bottomRow, value -> Math.abs(32768 + rand.nextInt(65536)) % 256);
+//                    System.arraycopy(bottomRow, 0, fire, fireStartHeight, screenWidth);
+                    for(int i=fireStartHeight; i<fireStartHeight+screenWidth; i++) {
+                        fire[i] = Math.abs(32768 + rand.nextInt(65536)) % 256;
+                    }
                     int a, b, row, index, pixel;
                     
                     for (int y = 0; y < screenHeight - 1; y++) {
@@ -137,8 +143,10 @@ public class FireEffect extends Application {
 
                     pwBuffer.setPixels(0, 0, screenWidth, screenHeight, pixelFormat, fireBuf, 0, screenWidth);
                     elapseTime = System.currentTimeMillis() - startTime;
-                    System.out.println("Worker thread takes : " + elapseTime + "ms");
-                    Thread.sleep(33);
+//                    System.out.println("Worker thread takes : " + elapseTime + "ms");
+                    workTimesMillis = elapseTime;
+
+                    Thread.sleep(17);
                 }
                 return null;
             }
@@ -160,7 +168,13 @@ public class FireEffect extends Application {
                     pw.setPixels(0, 0, screenWidth, screenHeight, prBuffer, 0, 0);
                     lastTimerCall = now;    //update for the next animation
                     elapseTime = (System.nanoTime() - startTime)/1e6;
-                    System.out.println("UI Render thread takes : " + elapseTime + "ms");
+
+                    gc.setFill(Color.WHITE);
+                    gc.fillText("Worker time spent: " + workTimesMillis + "ms", 10, 15);
+
+                    //System.out.println("UI Render thread takes : " + elapseTime + "ms");
+                    elapseTime = (System.nanoTime() - startTime)/1e6;
+                    gc.fillText("UI Render thread takes : " + elapseTime + "ms", 10, 30);
                 }
             }
         };
@@ -204,11 +218,11 @@ public class FireEffect extends Application {
              (int)(colorRGB.getBlue()   *255);
     }    
 
-    static Color INTtoRGB(int colorINT) {
-      return new Color(
-        (colorINT / 65536) % 256, 
-        (colorINT / 256) % 256,
-        colorINT % 256,
-        1.0);
-    }    
+//    static Color INTtoRGB(int colorINT) {
+//      return new Color(
+//        (colorINT / 65536) % 256,
+//        (colorINT / 256) % 256,
+//        colorINT % 256,
+//        1.0);
+//    }
 }    
