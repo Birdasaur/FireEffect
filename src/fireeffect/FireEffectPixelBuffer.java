@@ -21,7 +21,6 @@ import javafx.scene.layout.HBox;
 import javafx.scene.paint.Color;
 import javafx.stage.Stage;
 
-import java.nio.ByteBuffer;
 import java.nio.IntBuffer;
 import java.util.Random;
 
@@ -102,7 +101,7 @@ public class FireEffectPixelBuffer extends Application {
         int[] fire = new int[screenHeight * screenWidth];  //this buffer will contain the fire
 
         // new way to store image Shared pixel buffer.
-        IntBuffer intBuffer = ByteBuffer.allocateDirect(4 * screenWidth * screenHeight).asIntBuffer();
+        IntBuffer intBuffer = IntBuffer.allocate(screenWidth * screenHeight);
         PixelFormat<IntBuffer> pixelFormat = PixelFormat.getIntArgbPreInstance();
         PixelBuffer<IntBuffer> pixelBuffer = new PixelBuffer<>(screenWidth, screenHeight, intBuffer, pixelFormat);
 
